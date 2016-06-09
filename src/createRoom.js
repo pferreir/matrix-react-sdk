@@ -35,7 +35,9 @@ function createRoom(opts) {
 
     var ErrorDialog = sdk.getComponent("dialogs.ErrorDialog");
     var NeedToRegisterDialog = sdk.getComponent("dialogs.NeedToRegisterDialog");
+    var CreateRoomDialog = sdk.getComponent("dialogs.CreateRoomDialog");
     var Loader = sdk.getComponent("elements.Spinner");
+
 
     var client = MatrixClientPeg.get();
     if (client.isGuest()) {
@@ -46,10 +48,12 @@ function createRoom(opts) {
         return q(null);
     }
 
+
     // set some defaults for the creation
     var createOpts = opts.createOpts || {};
     createOpts.preset = createOpts.preset || 'private_chat';
     createOpts.visibility = createOpts.visibility || 'private';
+    createOpts.creation_content = createOpts.creation_content || {};
 
     // Allow guests by default since the room is private and they'd
     // need an invite. This means clicking on a 3pid invite email can
@@ -64,22 +68,43 @@ function createRoom(opts) {
         }
     ];
 
-    var modal = Modal.createDialog(Loader);
 
-    return client.createRoom(createOpts).finally(function() {
-        modal.close();
-    }).then(function(res) {
-        dis.dispatch({
-            action: 'view_room',
-            room_id: res.room_id
+    var deferred = q.defer();
+    var modal = Modal.createDialog(CreateRoomDialog, {
+        onFinished: function(create, opts) {
+            deferred.resolve(create ? opts : null);
+        },
+    });
+
+    return deferred.promise.then(function(dialogOpts) {
+        if (!dialogOpts) {
+            // cancelled
+            return null;
+        }
+
+        if (dialogOpts.encrypt) {
+            createOpts.creation_content['m.encryption'] = {
+                algorithm: "m.olm.v1.curve25519-aes-sha2",
+            };
+        }
+
+        var modal = Modal.createDialog(Loader);
+
+        return client.createRoom(createOpts).finally(function() {
+            modal.close();
+        }).then(function(res) {
+            dis.dispatch({
+                action: 'view_room',
+                room_id: res.room_id
+            });
+            return res.room_id;
+        }, function(err) {
+            Modal.createDialog(ErrorDialog, {
+                title: "Failure to create room",
+                description: err.toString()
+            });
+            return null;
         });
-        return res.room_id;
-    }, function(err) {
-        Modal.createDialog(ErrorDialog, {
-            title: "Failure to create room",
-            description: err.toString()
-        });
-        return null;
     });
 }
 
